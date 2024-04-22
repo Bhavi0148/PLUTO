@@ -1,0 +1,450 @@
+import cv2
+import mediapipe as mp
+import pyautogui
+import pyttsx3
+import speech_recognition as sr
+from datetime import datetime
+import os
+import webbrowser
+import subprocess
+
+
+# Function to control mouse actions based on hand gestures
+def hand_gesture_control():
+    # Open the camera capture
+    cap = cv2.VideoCapture(0)
+
+    # Initialize MediaPipe hand modules for hand tracking
+    hand_detector = mp.solutions.hands.Hands()
+    drawing_utils = mp.solutions.drawing_utils
+
+    # Get the screen dimensions for mouse control
+    screen_width, screen_height = pyautogui.size()
+    index_x, index_y = 0, 0
+    scroll_up = False
+    scroll_down = False
+
+    # Distance threshold for landmarks 8 and 3 to be considered touching
+    touch_distance_threshold = 30  # Adjust this value based on your preference
+
+    # Main loop for capturing and processing video frame
+    while True:
+        # Read the frame from camera
+        _, frame = cap.read()
+        frame = cv2.flip(frame, 1)
+        frame_height, frame_width, _ = frame.shape
+        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+        # Use MediaPipe to detect hands in the frame
+        output = hand_detector.process(rgb_frame)
+        hands = output.multi_hand_landmarks
+
+        # Process each detected hand
+        if hands:
+            for hand in hands:
+                drawing_utils.draw_landmarks(frame, hand)
+                landmarks = hand.landmark
+                x_4, y_4, x_16, y_16, x_20, y_20 = 0, 0, 0, 0, 0, 0
+
+                # Process each landmark in the hand
+                for landmark_id, landmark in enumerate(landmarks):
+                    x = int(landmark.x * frame_width)
+                    y = int(landmark.y * frame_height)
+
+                    # Exit if distance between landmark 8 and 3 is below the threshold
+                    if landmark_id == 8:
+                        distance_8_3 = ((x - landmarks[3].x * frame_width) ** 2 +
+                                        (y - landmarks[3].y * frame_height) ** 2) ** 0.5
+                        if distance_8_3 < touch_distance_threshold:
+                            print("Landmarks 8 and 3 touched. Returning to voice assistant.")
+                            return
+
+                    # Move the mouse with the index finger
+                    if landmark_id == 8:
+                        cv2.circle(img=frame, center=(x, y), radius=15, color=(0, 255, 0))
+                        index_x = screen_width / frame_width * x
+                        index_y = screen_height / frame_height * y
+                        pyautogui.moveTo(index_x, index_y)
+
+                    # Right click with the middle finger
+                    if landmark_id == 12:
+                        cv2.circle(img=frame, center=(x, y), radius=15, color=(0, 225, 0))
+                        middle_x = screen_width / frame_width * x
+                        middle_y = screen_height / frame_height * y
+                        distance = abs(index_x - middle_x) + abs(index_y - middle_y)
+                        if distance < 20:
+                            pyautogui.rightClick()
+
+                    # Left click with the thumb
+                    if landmark_id == 4:
+                        cv2.circle(img=frame, center=(x, y), radius=15, color=(0, 255, 0))
+                        # thumb_x = screen_width / frame_width * x
+                        thumb_y = screen_height / frame_height * y
+                        print('outside', abs(index_y - thumb_y))
+                        if abs(index_y - thumb_y) < 20:
+                            pyautogui.click()
+                            pyautogui.sleep(1)
+
+                    # Store coordinates for scroll gesture
+                    if landmark_id == 4:
+                        x_4 = screen_width / frame_width * x
+                        y_4 = screen_height / frame_height * y
+
+                    if landmark_id == 16:
+                        cv2.circle(img=frame, center=(x, y), radius=15, color=(0, 255, 0))
+                        x_16 = screen_width / frame_width * x
+                        y_16 = screen_height / frame_height * y
+
+                    if landmark_id == 20:
+                        cv2.circle(img=frame, center=(x, y), radius=15, color=(0, 255, 0))
+                        x_20 = screen_width / frame_width * x
+                        y_20 = screen_height / frame_height * y
+
+                # Calculate distance for scroll gestures
+                distance_up = ((x_16 - x_4) ** 2 + (y_16 - y_4) ** 2) ** 0.5
+                distance_down = ((x_20 - x_4) ** 2 + (y_20 - y_4) ** 2) ** 0.5
+
+                # Scroll up if the distance is small
+                if distance_up < 20:
+                    if not scroll_up:
+                        pyautogui.press('pageup')
+                        scroll_up = True
+                else:
+                    scroll_up = False
+
+                # Scroll down if the distance is small
+                if distance_down < 20:
+                    if not scroll_down:
+                        pyautogui.press('pagedown')
+                        scroll_down = True
+                else:
+                    scroll_down = False
+
+        # Display the frame with annotations
+        cv2.imshow('Virtual Mouse', frame)
+        if cv2.waitKey(1) & 0xFF == 27:  # Press 'Esc' to exit the program
+            break
+
+    # Release the camera and close the window
+    cap.release()
+    cv2.destroyAllWindows()
+
+
+# Function to handle voice assistant commands
+def voice_assistant():
+    # Initialize the speech recognizer
+    recognizer = sr.Recognizer()
+
+    speak("Hello! I am PLUTO, your voice assistant. How can I help you today?")
+    while True:
+        with sr.Microphone() as source:
+            print("Listening...")
+            recognizer.adjust_for_ambient_noise(source)
+            audio = recognizer.listen(source)
+
+        try:
+            command = recognizer.recognize_google(audio).lower()
+            print("You said:", command)
+
+            if "date" in command:
+                date = datetime.now().strftime("%B %d, %Y")
+                speak(f"The current date is {date}")
+
+            elif "time" in command:
+                time = datetime.now().strftime("%H:%M:%S")
+                speak(f"The current time is {time}")
+
+            elif "activate hand gestures" in command:
+                speak("Activating hand gestures.")
+                hand_gesture_control()
+            elif "open notepad" in command:
+                open_application("notepad")
+
+            elif "close notepad" in command:
+                close_application("notepad")
+
+            elif "open word" in command:
+                open_application("winword")
+
+            elif "blank page" in command:
+                os.system('start winword /w')
+
+            elif "new document" in command:
+                os.system('start winword /n')
+
+            elif "open existing file" in command:
+                speak("Please provide the file path.")
+                audio = recognizer.listen(source)
+                file_path = recognizer.recognize_google(audio)
+                os.system(f'start winword "{file_path}"')
+
+            elif "close word" in command:
+                close_application("winword")
+
+            elif "open powerpoint" in command:
+                open_application("powerpnt")
+
+            elif "close powerpoint" in command:
+                close_application("powerpnt")
+
+            elif "open powerpoint slideshow" in command:
+                open_powerpoint_slideshow()
+
+            elif "open powerpoint new document" in command:
+                open_powerpoint_new_document()
+
+            elif "next slide" in command:
+                next_slide()
+
+            elif "previous slide" in command:
+                previous_slide()
+
+            elif "exit slide show" in command:
+                exit_slide_show()
+
+            elif "open file manager" in command:
+                open_application("explorer")
+
+            elif "close file manager" in command:
+                close_application("explorer")
+
+            elif "open c drive" in command:
+                open_local_disk("C")
+
+            elif "close c drive" in command:
+                close_local_disk("C")
+
+            elif "open d drive" in command:
+                open_local_disk("D")
+
+            elif "close d drive" in command:
+                close_local_disk("D")
+
+            elif "open e drive" in command:
+                open_local_disk("E")
+
+            elif "close e drive" in command:
+                close_local_disk("E")
+
+            elif "open file folder" in command:
+                speak("Please specify the file folder name.")
+                folder_name = get_voice_input()
+                open_file_folder(folder_name)
+
+            elif "close file folder" in command:
+                speak("Please specify the file folder name.")
+                folder_name = get_voice_input()
+                close_file_folder(folder_name)
+
+            elif "open file" in command:
+                speak("Please specify the file name.")
+                file_name = get_voice_input()
+                open_file(file_name)
+
+            elif "open browser" in command:
+                webbrowser.open("https://www.google.com")
+                speak("Opening the browser")
+
+            elif "close browser" in command:
+                speak("Closing the browser")
+                os.system("taskkill /f /im chrome.exe")
+
+            elif "open youtube" in command:
+                webbrowser.open("https://www.youtube.com")
+                speak("Opening YouTube")
+
+            elif "close youtube" in command:
+                speak("Closing YouTube")
+                os.system("taskkill /f /im chrome.exe")  # You may need to adapt this based on your system
+
+            elif "search youtube" in command:
+                search_youtube()
+
+            elif "search browser" in command:
+                search_browser()
+
+            elif "page up" in command:
+                page_up()
+
+            elif "page down" in command:
+                page_down()
+
+            elif "exit" in command:
+                speak("Goodbye! Have a great day.")
+                exit()  # Exit the program
+
+            else:
+                speak("Sorry, I didn't understand that command.")
+
+        except sr.UnknownValueError:
+            print("PLUTO could not understand audio")
+        except sr.RequestError as e:
+            print(f"Error with the recognition service; {e}")
+
+
+def speak(text):
+    engine = pyttsx3.init()
+    engine.say(text)
+    engine.runAndWait()
+
+
+def get_date():
+    now = datetime.now()
+    current_date = now.strftime("%B %d, %Y")
+    return current_date
+
+
+def get_time():
+    now = datetime.now()
+    current_time = now.strftime("%H:%M:%S")
+    return current_time
+
+
+def open_application(application_name):
+    try:
+        os.system(f'start {application_name}')
+        speak(f"Opening {application_name}")
+    except Exception as e:
+        speak(f"Error opening {application_name}: {e}")
+
+
+def close_application(application_name):
+    try:
+        os.system(f'taskkill /f /im {application_name}.exe')
+        speak(f"Closing {application_name}")
+    except Exception as e:
+        speak(f"Error closing {application_name}: {e}")
+
+
+def page_up():
+    pyautogui.press("pageup")
+
+
+def page_down():
+    pyautogui.press("pagedown")
+
+
+def open_browser():
+    webbrowser.open("https://www.google.com")
+    speak("Opening the browser")
+
+
+def close_browser():
+    speak("Closing the browser")
+    os.system("taskkill /f /im chrome.exe")
+
+
+def open_youtube():
+    webbrowser.open("https://www.youtube.com")
+    speak("Opening YouTube")
+
+
+def close_youtube():
+    speak("Closing YouTube")
+    os.system("taskkill /f /im chrome.exe")
+
+
+def open_powerpoint_slideshow():
+    open_application("powerpnt")
+    pyautogui.hotkey("F5")  # Start slideshow
+
+
+def open_powerpoint_new_document():
+    open_application("powerpnt")
+    pyautogui.hotkey("ctrl", "n")  # New document
+
+
+def next_slide():
+    pyautogui.press("right")
+
+
+def previous_slide():
+    pyautogui.press("left")
+
+
+def exit_slide_show():
+    pyautogui.press("esc")
+
+
+def search_youtube():
+    speak("What would you like to search for on YouTube?")
+    query = get_voice_input().lower()
+    search_url = f"https://www.youtube.com/results?search_query={query}"
+    webbrowser.open(search_url)
+    speak(f"Here are the search results for {query} on YouTube")
+
+
+def search_browser():
+    speak("What would you like to search for in the browser?")
+    query = get_voice_input().lower()
+    search_url = f"https://www.google.com/search?q={query}"
+    webbrowser.open(search_url)
+    speak(f"Here are the search results for {query} in the browser")
+
+
+def open_local_disk(drive_letter):
+    try:
+        subprocess.Popen(f'explorer {drive_letter}:\\')
+        speak(f"Opening {drive_letter} drive")
+    except Exception as e:
+        speak(f"Error opening {drive_letter} drive: {e}")
+
+
+def close_local_disk(drive_letter):
+    try:
+        subprocess.Popen(f'TASKKILL /F /FI "WINDOWTITLE eq {drive_letter}:\\*" /T')
+        speak(f"Closing {drive_letter} drive")
+    except Exception as e:
+        speak(f"Error closing {drive_letter} drive: {e}")
+
+
+def open_file_folder(folder_name):
+    try:
+        subprocess.Popen(f'explorer "{folder_name}"')
+        speak(f"Opening folder {folder_name}")
+    except Exception as e:
+        speak(f"Error opening folder {folder_name}: {e}")
+
+
+def close_file_folder(folder_name):
+    try:
+        subprocess.Popen(f'TASKKILL /F /FI "WINDOWTITLE eq {folder_name}*" /T')
+        speak(f"Closing folder {folder_name}")
+    except Exception as e:
+        speak(f"Error closing folder {folder_name}: {e}")
+
+
+def open_file(file_name):
+    try:
+        os.startfile(file_name)
+        speak(f"Opening file {file_name}")
+    except Exception as e:
+        speak(f"Error opening file {file_name}: {e}")
+
+
+def get_voice_input():
+    recognizer = sr.Recognizer()
+    with sr.Microphone() as source:
+        print("Listening...")
+        recognizer.adjust_for_ambient_noise(source)
+        audio = recognizer.listen(source)
+
+    try:
+        command = recognizer.recognize_google(audio).lower()
+        print("You said:", command)
+        return command
+    except sr.UnknownValueError:
+        print("PLUTO could not understand audio")
+        return ""
+    except sr.RequestError as e:
+        print(f"Error with the recognition service; {e}")
+        return ""
+
+
+def main():
+    while True:
+        voice_assistant()
+
+
+if __name__ == "__main__":
+    main()
